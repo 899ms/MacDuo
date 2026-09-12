@@ -1,0 +1,76 @@
+<p align="center"><img src="Resources/MacDuo.png" width="104" alt="MacDuo icon"></p>
+<h1 align="center">MacDuo</h1>
+<p align="center">A little motion. A different feeling.</p>
+<p align="center"><a href="README.md">简体中文</a> · <a href="https://github.com/andyhuo520/MacDuo/releases">Downloads</a> · <a href="LICENSE">MIT</a></p>
+
+![MacDuo concept illustration](docs/images/hero.png)
+
+A native macOS menu bar experiment that turns your MacBook's lid angle into a soft frosted-glass desktop effect. Close the lid gently to advance the frost; open it to reveal the desktop. Mouse or keyboard activity immediately restores the real desktop.
+
+**The images are AI-generated concept illustrations, not screenshots.** MacDuo does not bend the screen hardware or geometrically fold your page. It renders a stationary desktop snapshot with an angle-driven glass veil.
+
+## Features
+
+- About 3° of closing motion triggers a fresh, single desktop snapshot.
+- Progressive two-stage blur, subtle refraction and clear uncovered content. No scanning light stripe.
+- Non-focusable, click-through overlay that disappears when you interact.
+- Menu bar pause, resume and status controls; no floating desktop toolbar.
+- After 90 seconds without meaningful lid movement, rendering resources are released. Low-rate monitoring remains ready for the next gesture.
+- Pauses during sleep and lock; attempts to resume after unlock. Expired system screen selections must be renewed.
+- Optional opening sound using your own WAV file. Audio is disabled by default; no recording is distributed.
+
+## Requirements and installation
+
+**macOS 15.2+, Apple Silicon MacBook and a readable lid-angle sensor.** Used on a MacBook Pro18,3 (M1 Pro) development machine running macOS 26. Other models have not been individually verified. Intel Macs, external displays and devices without the sensor are outside the supported scope.
+
+Download the Apple Silicon DMG from [Releases](https://github.com/andyhuo520/MacDuo/releases), drag MacDuo to Applications and launch it. Click **选择屏幕并开始** (Select screen and start), then choose the built-in display in the system picker. Close the lid gently. Reopen it or move the mouse to restore the desktop. Closing the controller leaves the menu bar app running.
+
+The native UI is currently in Chinese. **Public builds are development-signed and not notarized**, so macOS may block launching them. You can review the source and build locally. Effects are unavailable on the lock/login screen.
+
+### Optional audio
+
+Place a licensed WAV recording at `~/Library/Application Support/MacDuo/HingeCreak.wav`, restart and enable **开盖音效** in the menu. A short, quiet recording of approximately two seconds is recommended. Developers can instead add `Resources/HingeCreak.wav` before building; Git ignores it.
+
+## Scenarios
+
+![Night coding concept](docs/images/coding.png)
+![Photography workspace concept](docs/images/creative.png)
+
+AI concept illustrations. Actual visuals depend on desktop content and lid angle. The snapshot does not continuously refresh videos or application content.
+
+## Build and test
+
+Install Xcode or Command Line Tools with a macOS 15.2+ SDK and a working `xcrun swiftc`:
+
+```sh
+git clone https://github.com/andyhuo520/MacDuo.git
+cd MacDuo
+zsh build.sh
+zsh scripts/test.sh
+```
+
+The output is `MacDuo.app`. Local builds default to ad-hoc signing. Set your own identity for development-signed builds:
+
+```sh
+DUOFOLD_SIGNING_IDENTITY="Apple Development: Your Name (TEAMID)" zsh build.sh
+```
+
+Quit existing MacDuo instances before replacing an installation. Keep the bundle ID, path and signing identity stable across updates to reduce permission issues.
+
+Tests cover repeated gestures, input handoff, standby, lifecycle recovery, menu actions, audio motion detection and Metal pixel regression. They do not lock or capture your desktop; some briefly start actual sensor subprocesses. A Metal-capable Mac is required. Physical lid motion, screen selection and wake behavior still need manual verification.
+
+## Architecture and privacy
+
+Swift/AppKit manages the app, IOKit reads the lid sensor, ScreenCaptureKit captures a single frame, Core Image prepares blur textures, and Metal renders the stationary cover. Sensor and watchdog workers run as separate processes.
+
+No camera, microphone, network access or saved desktop screenshots. Input detection compares event counts without reading typed content. Local lifecycle, angle and error logs live at `~/Library/Logs/DuoFoldDesktop/lifecycle.log`. The watchdog can terminate an unresponsive app, but cannot guarantee recovery from system-level GPU or kernel failures.
+
+See [architecture](docs/ARCHITECTURE.md) and [contributing](CONTRIBUTING.md).
+
+## Credits
+
+By Berryxia · [X](https://x.com/Berryxia) · [andyhuo@me.com](mailto:andyhuo@me.com)
+
+Inspired by duo.grok.me. Angular fitting and portions of historical geometry derive from [Bendable](https://github.com/opensourcevillain/Bendable), with its MIT license preserved. Independent project; not affiliated with Apple.
+
+[MIT](LICENSE) · [Third-party and artwork notices](THIRD_PARTY_NOTICES.md)

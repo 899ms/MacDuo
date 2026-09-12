@@ -1,0 +1,89 @@
+<p align="center"><img src="Resources/MacDuo.png" width="104" alt="MacDuo icon"></p>
+<h1 align="center">MacDuo</h1>
+<p align="center">A little motion. A different feeling.<br>随手合盖，让桌面覆上一层玻璃。</p>
+<p align="center"><a href="README.en.md">English</a> · <a href="https://github.com/andyhuo520/MacDuo/releases">下载 / Downloads</a> · <a href="LICENSE">MIT License</a></p>
+
+![MacDuo 浅色桌面场景示意](docs/images/hero.png)
+
+MacDuo 是一个原生 macOS 菜单栏应用。缓慢合上 MacBook 屏幕时，桌面上的毛玻璃覆盖范围随角度向下延伸；重新展开时逐渐恢复清晰。移动鼠标或操作键盘，就立即交还真实桌面。
+
+> 上图及下方场景图均为 AI 生成的效果示意，并非应用实拍。屏幕硬件不会弯曲，软件也不会把页面翻折；实际效果是原位桌面快照上的渐进毛玻璃。
+
+## 特性
+
+- **跟随开合角度**：合盖约 3° 触发一次桌面截图，雾化范围和强度随角度变化，未覆盖部分保持清晰。
+- **柔和玻璃材质**：两级模糊、轻微折射与通透感，没有扫描光带。
+- **不挡操作**：覆盖层不获取键盘焦点，鼠标穿透；检测到输入即撤下快照。
+- **菜单栏控制**：暂停、恢复、查看状态和退出，没有常驻桌面浮条。
+- **自动待机**：90 秒没有明显角度变化，释放效果窗口和纹理；保留低频检测，再次合盖唤醒。
+- **休眠恢复**：锁屏期间暂停，解锁后尝试恢复；若系统共享选择失效，需要重新选屏。
+- **可选开盖音效**：支持自己的 WAV 录音，默认关闭。公开版不附带音频。
+
+## 安装与开始
+
+要求 **macOS 15.2+、Apple Silicon MacBook，以及可读取的开盖角度传感器**。已在 MacBook Pro18,3（M1 Pro，macOS 26）开发机上使用；其他机型尚未逐一验证。Intel Mac、外接屏幕和没有角度传感器的设备不在支持范围内。
+
+1. 从 [Releases](https://github.com/andyhuo520/MacDuo/releases) 下载 Apple Silicon DMG，将 MacDuo 拖到 Applications。
+2. 打开 MacDuo，点击「选择屏幕并开始」，在 macOS 选择器中选择内置屏幕。
+3. 缓慢合盖，观察磨砂范围变化；展开恢复。移动鼠标或按键也会立即结束当前画面。
+4. 关闭控制窗口后，通过菜单栏电脑图标继续控制。暂停只停止监听，退出则关闭应用。
+
+目前发布包为**开发签名、未公证试用版**，macOS 可能阻止打开；可自行审阅源码并构建。应用不会在锁屏或登录界面显示效果。
+
+### 可选音效
+
+将你有权使用的 WAV 文件放到 `~/Library/Application Support/MacDuo/HingeCreak.wav`，重新启动应用，然后在菜单栏开启「开盖音效」。建议使用约 2 秒、音量适中的录音。源码构建也可将文件放入 `Resources/HingeCreak.wav`；该路径已被 Git 忽略。
+
+## 场景
+
+### 夜间编程
+
+![夜间编程概念场景，顶部磨砂、底部清晰](docs/images/coding.png)
+
+### 摄影工作台
+
+![摄影工作台概念场景，渐进玻璃覆盖](docs/images/creative.png)
+
+以上均为 AI 概念图。实际效果根据桌面内容和合盖角度变化，当前版本不会持续刷新快照内的视频或应用内容。
+
+## 从源码构建
+
+安装提供 macOS 15.2 或更新 SDK 的 Xcode / Command Line Tools，并确保 `xcrun swiftc` 可用：
+
+```sh
+git clone https://github.com/andyhuo520/MacDuo.git
+cd MacDuo
+zsh build.sh
+```
+
+生成 `MacDuo.app`。默认使用临时签名，供本地构建；要使用自己的开发签名：
+
+```sh
+DUOFOLD_SIGNING_IDENTITY="Apple Development: Your Name (TEAMID)" zsh build.sh
+```
+
+不要修改正在运行的应用。保持安装路径、Bundle ID 和签名身份稳定，可以减少更新后的授权问题。安装本地构建前先退出已有 MacDuo。
+
+### 测试
+
+```sh
+zsh scripts/test.sh
+```
+
+覆盖连续开合、输入接管、待机、菜单、休眠恢复状态机、音效触发以及 Metal 像素回归。测试不会锁屏或捕获桌面，但部分测试会短暂启动真实传感器子进程；需要支持 Metal 的 Mac。自动测试不能替代实际合盖、选屏授权和唤醒验证。
+
+## 实现与隐私
+
+Swift + AppKit 管理应用与菜单；IOKit 读取角度，ScreenCaptureKit 单次捕获桌面，Core Image 准备两级模糊纹理，Metal 根据角度绘制原位覆盖层。传感器和看门狗位于独立子进程。
+
+每次触发仅捕获一张本地快照，不使用摄像头或麦克风、不联网、不保存桌面截图。输入检测只比较系统事件计数，不读取按键内容。状态日志保存在 `~/Library/Logs/DuoFoldDesktop/lifecycle.log`，包含生命周期、角度与错误信息。看门狗可结束失去响应的应用，但不能保证恢复系统级 GPU 或内核故障。
+
+详见 [架构说明](docs/ARCHITECTURE.md) 与 [贡献指南](CONTRIBUTING.md)。
+
+## 作者与致谢
+
+Berryxia · [X](https://x.com/Berryxia) · [andyhuo@me.com](mailto:andyhuo@me.com)
+
+灵感来源：duo.grok.me。角度拟合及部分早期几何实现参考 [Bendable](https://github.com/opensourcevillain/Bendable)，保留其 MIT 许可。MacDuo 为独立项目，与 Apple 无关联。
+
+[MIT License](LICENSE) · [第三方及素材说明](THIRD_PARTY_NOTICES.md)

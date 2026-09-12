@@ -1,0 +1,10 @@
+*.app/
+.DS_Store
+.build/
+dist/
+*.dmg
+*.log
+.env*
+Resources/HingeCreak.wav
+*.p12
+*.mobileprovision
