@@ -34,12 +34,17 @@ fragment float4 foldFragment(Varying in [[stage_in]],bool front [[front_facing]]
  constexpr sampler s(filter::linear,address::clamp_to_edge);
  if(p.mode>5.5) {
   float progress=smoothstep(0.0,1.0,clamp(p.progress,0.0,1.0));
-  float coordinate=p.padding>0.5 ? in.uv.y : in.uv.x;
-  // Soft diffusion front: clear at zero, fully frosted at one, no light stripe.
-  float front=mix(-.18,1.18,progress);
-  float amount=1-smoothstep(front-.18,front+.18,coordinate);
+  float coordinate=p.padding<.5 ? in.uv.x : (p.padding<1.5 ? in.uv.y : (p.padding<2.5 ? 1-in.uv.x : 1-in.uv.y));
+  float along=(p.padding<.5 || (p.padding>1.5 && p.padding<2.5)) ? in.uv.y : in.uv.x;
+  // Broad, softly undulating material front. No luminous edge or scanning line.
+  float wave=(.045*sin(along*6.283+progress*2.1)+.022*sin(along*11.0-progress*1.7))*sin(progress*3.14159265);
+  float front=mix(-.24,1.24,progress)+wave;
+  float amount=1-smoothstep(front-.24,front+.24,coordinate);
+  float rim=exp(-pow((coordinate-front)/.16,2.0))*sin(progress*3.14159265);
+  float2 normal=p.padding<.5 ? float2(1,0) : (p.padding<1.5 ? float2(0,1) : (p.padding<2.5 ? float2(-1,0) : float2(0,-1)));
+  float2 glassUV=in.uv+normal*(.009*rim*amount);
   float3 original=sharp.sample(s,in.uv).rgb;
-  float3 soft=mix(lightBlur.sample(s,in.uv).rgb,blurred.sample(s,in.uv).rgb,.95);
+  float3 soft=mix(lightBlur.sample(s,glassUV).rgb,blurred.sample(s,glassUV).rgb,smoothstep(.05,.95,amount)*.95);
   return float4(mix(original,soft,amount),1);
  }
  // Desktop Duo is a lid-driven frosted cover: retain the original page coordinates.

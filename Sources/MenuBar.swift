@@ -18,6 +18,7 @@ import Cocoa
   let fold=NSMenuItem(title:"切换到合盖模式",action:#selector(chooseFoldMode),keyEquivalent:"");fold.target=self;statusMenu.addItem(fold)
   let attention=NSMenuItem(title:"切换到注视模式（摄像头）",action:#selector(chooseAttentionMode),keyEquivalent:"");attention.target=self;statusMenu.addItem(attention)
   statusMenu.addItem(.separator());statusMenu.addItem(toggleItem)
+  let restore=NSMenuItem(title:"恢复清晰…",action:#selector(requestAttentionRestore),keyEquivalent:"");restore.target=self;statusMenu.addItem(restore)
   soundItem.target=self;statusMenu.addItem(soundItem)
   let preview=NSMenuItem(title:"试听开盖音效",action:#selector(previewSound),keyEquivalent:"");preview.target=self;preview.isEnabled=hingeSound.audioURL != nil;statusMenu.addItem(preview)
   let settings=NSMenuItem(title:"打开控制窗口…",action:#selector(showController),keyEquivalent:"");settings.target=self;statusMenu.addItem(settings)
@@ -42,8 +43,8 @@ import Cocoa
   statusItem?.button?.toolTip="MacDuo · "+menuStatus.title
  }
  func menuWillOpen(_ menu:NSMenu) {
-  menuIsOpen=true;hingeSound.stop();attentionAmount=0;attentionSuppressedUntil=ProcessInfo.processInfo.systemUptime+2
-  if state.phase == .capturing || state.phase == .folding {
+  menuIsOpen=true;hingeSound.stop();if !attentionHold.locked {attentionAmount=0};attentionSuppressedUntil=ProcessInfo.processInfo.systemUptime+2
+  if !attentionHold.locked && (state.phase == .capturing || state.phase == .folding) {
    clearFoldResources();state.yieldToUser()
   }
   refreshStatusMenu()

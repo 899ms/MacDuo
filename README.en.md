@@ -11,7 +11,7 @@ A native macOS menu bar experiment that turns your MacBook's lid angle into a so
 
 ## Attention mode — experimental in 1.1.0
 
-Choose **注视模式 · 使用摄像头** in the controller, start screen sharing and allow camera access. Face the screen for about half a second to become ready. Looking away for roughly one second gradually blurs the whole screen; facing it again restores clarity. Mouse/keyboard input immediately yields the desktop and suppresses blur for two seconds.
+Choose **注视模式 · 使用摄像头** in the controller, start screen sharing and allow camera access. Face the screen for about half a second to become ready. Configure an absence delay from 1 second to 5 minutes. Glass diffuses from a random edge. Hold mode is enabled by default and requires confirmation to restore; disable it for automatic return and input handoff.
 
 This estimates **head orientation, not exact eye gaze**. Eye-only movements may be missed; lighting, glasses, pose and multiple faces affect reliability. It is not a security or privacy lock. Camera interruption clears the overlay and stops monitoring.
 
@@ -83,6 +83,11 @@ Inspired by duo.grok.me. Angular fitting and portions of historical geometry der
 
 [MIT](LICENSE) · [Third-party and artwork notices](THIRD_PARTY_NOTICES.md)
 
-### 1.1.1 Directional diffusion
 
-Attention mode supports left-to-right (default) or top-to-bottom diffusion, saved across launches. Frost spreads over approximately 0.9 seconds and retreats over 0.45 seconds when you face the screen. The soft front has no illuminated scan line; untouched areas remain sharp.
+## 1.2.0: absence timer, reminder and flowing glass
+
+Choose an absence delay of 1/3/5/10/30 seconds or 1/2/5 minutes. Diffusion automatically starts from a random edge and flows across over about 1.6 seconds with a broad undulating front and gentle refraction. No direction selector or illuminated scan line.
+
+Hold mode keeps the blur when you return; a card shows elapsed absence, a local text reminder and a Welcome back prompt. Restore explicitly, optionally with macOS device-owner authentication (Touch ID/system password); the app never reads the password. Cancelled authentication keeps the cover. Disable Hold for automatic restoration.
+
+Held covers receive mouse and keyboard input; Escape requests restoration. The menu bar can always restore, pause or quit. Pause, quit and system lock clean up the effect and timer. This is a visual break cover, not a security lock: pausing or quitting bypasses it. Real identity-authentication prompts require manual validation.

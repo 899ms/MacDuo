@@ -3,6 +3,7 @@ import Vision
 
 /// Debounce head direction; never obscure the desktop before seeing a valid face.
 struct AttentionGate {
+ var awayDelay=1.0
  var calibrated=false
  var away=false
  var candidate:Bool?
@@ -17,7 +18,7 @@ struct AttentionGate {
   let next = !facing
   if next==away {candidate=nil;return}
   if candidate != next {candidate=next;since=now}
-  if now-since >= (next ? 1.0 : 0.20) {away=next;candidate=nil}
+  if now-since >= (next ? awayDelay : 0.20) {away=next;candidate=nil}
  }
 }
 

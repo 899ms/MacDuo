@@ -1,8 +1,9 @@
 import Cocoa
 import MetalKit
 import ScreenCaptureKit
+import LocalAuthentication
 
-final class DesktopPanel: NSPanel {
+class DesktopPanel: NSPanel {
  override var canBecomeKey: Bool { false }
  override var canBecomeMain: Bool { false }
 }
@@ -51,8 +52,8 @@ final class DesktopPanel: NSPanel {
  var showsControls=true
  var attentionMode=false
  let modePicker=NSPopUpButton()
- let directionPicker=NSPopUpButton()
- var attentionDirection:Int {UserDefaults.standard.integer(forKey:"attentionDirection") == 1 ? 1 : 0}
+ let attentionPreferences=AttentionPreferences(frame:.zero)
+ var attentionDirection=0
  var attentionLastTick=0.0
  var attentionMonitor:AttentionMonitor?
  var attentionTicket=UUID()
@@ -60,9 +61,14 @@ final class DesktopPanel: NSPanel {
  var attentionLastSample=0.0
  var attentionSuppressedUntil=0.0
  var attentionAmount:Float=0
+ var attentionHold=AttentionHold()
+ var attentionCard:AttentionCard?
+ var attentionRestoreNotice:String?
+ var attentionAuthenticating=false
+ var attentionAuthContext:LAContext?
 
  func applicationDidFinishLaunching(_ notification: Notification) {
-  window=NSWindow(contentRect:NSRect(x:0,y:0,width:460,height:450),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
+  window=NSWindow(contentRect:NSRect(x:0,y:0,width:460,height:690),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
   window.title="MacDuo"; window.isReleasedWhenClosed=false; window.delegate=self
   let stack=NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing=18
   stack.translatesAutoresizingMaskIntoConstraints=false; window.contentView!.addSubview(stack)
@@ -71,10 +77,9 @@ final class DesktopPanel: NSPanel {
   startButton=NSButton(title:"选择屏幕并开始",target:self,action:#selector(start)); startButton.bezelStyle = .rounded; startButton.controlSize = .large
   modePicker.addItems(withTitles:["合盖模式", "注视模式 · 使用摄像头"])
   modePicker.target=self;modePicker.action=#selector(changeMode(_:))
-  directionPicker.addItems(withTitles:["模糊扩散：从左到右", "模糊扩散：从上到下"])
-  directionPicker.selectItem(at:attentionDirection);directionPicker.isHidden=true
-  directionPicker.target=self;directionPicker.action=#selector(changeAttentionDirection(_:))
-  for view in [title,modePicker,directionPicker,detail,startButton!,message] { stack.addArrangedSubview(view) }
+  attentionPreferences.isHidden=true
+  attentionPreferences.onChange = {[weak self] in self?.attentionGate.awayDelay=AttentionPreferences.delaySeconds;self?.finishAttentionRestore()}
+  for view in [title,modePicker,attentionPreferences,detail,startButton!,message] { stack.addArrangedSubview(view) }
   let menuButton=NSButton(title:"菜单栏控制…",target:self,action:#selector(openStatusMenu));menuButton.bezelStyle = .rounded
   stack.addArrangedSubview(menuButton)
   let menu=NSMenu(), root=NSMenuItem(), appMenu=NSMenu()
@@ -145,7 +150,8 @@ final class DesktopPanel: NSPanel {
  }
  func stopMonitoring() {
   attentionTicket=UUID();attentionMonitor?.stop();attentionMonitor=nil
-  attentionGate=AttentionGate();attentionAmount=0
+  attentionGate=AttentionGate();attentionAmount=0;attentionHold.reset();attentionRestoreNotice=nil
+  attentionAuthContext?.invalidate();attentionAuthContext=nil;attentionAuthenticating=false
   hingeSound.stop()
   timer?.invalidate();timer=nil
   if let process=sensor,process.isRunning {process.terminate()};sensor=nil;sensorPipe=nil
@@ -289,6 +295,7 @@ final class DesktopPanel: NSPanel {
   }
  }
  func observeInputActivity(_ activity: InputActivity) {
+  if attentionMode && attentionHold.locked {lastInputActivity=activity;return}
   let changed=lastInputActivity.map { $0 != activity } ?? false
   lastInputActivity=activity
   guard changed else { return }
@@ -347,14 +354,15 @@ final class DesktopPanel: NSPanel {
  func showOverlay() {
   guard lifecycle.canMonitor else{return}
   guard let target=screen, let engine=renderer else { end("显示器已不可用。"); return }
-  let p=DesktopPanel(contentRect:target.frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
-  p.level = .floating; p.ignoresMouseEvents=true; p.hidesOnDeactivate=false; p.isReleasedWhenClosed=false
+  let p:DesktopPanel = attentionMode && attentionHold.locked ? AttentionCoverPanel(contentRect:target.frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false) : DesktopPanel(contentRect:target.frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+  p.level = .floating; p.ignoresMouseEvents = !(attentionMode && attentionHold.locked); p.hidesOnDeactivate=false; p.isReleasedWhenClosed=false
   p.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
   let v=MTKView(frame:NSRect(origin:.zero,size:target.frame.size),device:engine.device)
   v.delegate=engine; v.colorPixelFormat = .bgra8Unorm; v.depthStencilPixelFormat = .depth32Float
   v.isPaused=true; v.enableSetNeedsDisplay=false; v.autoResizeDrawable=false; v.framebufferOnly=true
   v.drawableSize=NSSize(width:1600,height:1600*target.frame.height/target.frame.width)
   p.contentView=v; overlay=p; canvas=v; p.orderFrontRegardless(); v.draw()
+  if let cover=p as? AttentionCoverPanel {cover.requestRestore = {[weak self] in self?.requestAttentionRestore()};cover.makeKeyAndOrderFront(nil)}
  }
  func setMonitoringInterval(_ interval:Double) {
   guard timer != nil else{return}
@@ -390,6 +398,7 @@ final class DesktopPanel: NSPanel {
   generation += 1
   captureTask?.cancel(); captureTask=nil
   captureTimeout?.cancel(); captureTimeout=nil
+  attentionCard?.orderOut(nil);attentionCard=nil
   overlay?.orderOut(nil); overlay=nil; canvas=nil; renderer=nil
   previousProgress = -1
  }
@@ -430,6 +439,18 @@ final class DesktopPanel: NSPanel {
     gate.sample(facing:true,at:t+2);gate.sample(facing:true,at:t+2.3)
     precondition(!gate.away)
    }
+   var delayed=AttentionGate();delayed.awayDelay=30
+   delayed.sample(facing:true,at:0);delayed.sample(facing:true,at:0.6)
+   delayed.sample(facing:false,at:1);delayed.sample(facing:false,at:30)
+   precondition(!delayed.away)
+   delayed.sample(facing:false,at:31.1);precondition(delayed.away)
+   var held=AttentionHold()
+   held.update(away:true,started:1,keep:true)
+   held.update(away:false,started:40,keep:true)
+   precondition(held.locked && held.elapsed(at:62)=="00:01:01","Held frost survives return and counts absence")
+   held.reset();precondition(!held.locked && held.since == nil)
+   held.update(away:true,started:3,keep:false);held.update(away:false,started:4,keep:false)
+   precondition(!held.locked && held.since == nil,"Automatic mode clears on return")
    let app=DesktopApp();app.showsControls=false
    app.setAttentionMode(true)
    precondition(app.attentionMonitor == nil && app.timer == nil,"Selecting mode alone never starts camera")
@@ -710,12 +731,12 @@ final class DesktopPanel: NSPanel {
     precondition(Array(attentionBlur[lowerStart...]) != Array(flat[lowerStart...]),"Attention mode must blur lower screen too")
     engine.params.progress=0
     precondition(engine.pixels(width:640,height:400)==flat,"Attention reversal restores original")
-    for direction:Float in [0,1] {
+    for direction:Float in [0,1,2,3] {
      engine.params.padding=direction;engine.params.progress=0.5
      let half=engine.pixels(width:640,height:400)
      var changedNear=false
      for y in 0..<400 {for x in 0..<640 {
-      let coordinate=direction==0 ? Float(x)/640 : Float(y)/400
+      let coordinate=direction==0 ? Float(x)/640 : (direction==1 ? Float(y)/400 : (direction==2 ? 1-Float(x)/640 : 1-Float(y)/400))
       let i=(y*640+x)*4
       if coordinate>0.75 {precondition(Array(half[i..<i+4])==Array(flat[i..<i+4]),"Diffusion must leave far side clear")}
       if coordinate<0.25 && Array(half[i..<i+4]) != Array(flat[i..<i+4]) {changedNear=true}
