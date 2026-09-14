@@ -80,9 +80,14 @@ final class AttentionMonitor:NSObject,AVCaptureVideoDataOutputSampleBufferDelega
     let face=request.results?.filter{$0.confidence>=0.6}.max { a,b in
      a.boundingBox.width*a.boundingBox.height < b.boundingBox.width*b.boundingBox.height
     }
+    // Generous pose tolerance. The camera sits above the display, so reading the lower half of
+    // a laptop screen already tilts the head well past a strict pitch limit, and glancing at the
+    // keyboard must not read as leaving. Only a clear turn away from the machine counts.
+    // A detected face whose pose the request cannot resolve still means someone is present.
     let facing:Bool
-    if let face=face,let yaw=face.yaw?.doubleValue,let pitch=face.pitch?.doubleValue {
-     facing=face.boundingBox.width>=0.10 && abs(yaw)<0.38 && abs(pitch)<0.32
+    if let face=face {
+     let yaw=face.yaw?.doubleValue ?? 0, pitch=face.pitch?.doubleValue ?? 0
+     facing=face.boundingBox.width>=0.08 && abs(yaw)<0.60 && abs(pitch)<0.55
     } else {facing=false}
     onSample?(facing)
    } catch {onError?("人脸方向识别失败："+error.localizedDescription)}

@@ -11,7 +11,7 @@ A native macOS menu bar experiment that turns your MacBook's lid angle into a so
 
 ## Attention mode — experimental in 1.1.0
 
-Choose **注视模式 · 使用摄像头** in the controller, start screen sharing and allow camera access. Face the screen for about half a second to become ready. Configure an absence delay from 1 second to 5 minutes. Glass diffuses from a random edge. Hold mode is enabled by default and requires confirmation to restore; disable it for automatic return and input handoff.
+Choose **注视模式 · 使用摄像头** in the controller, start screen sharing and allow camera access. Face the screen for about half a second to become ready. Blurring counts down only while you are both looking away and not touching the keyboard or mouse; either one breaking restarts the countdown, so working at the machine never blurs it. Configure the delay from immediate to 5 minutes. Glass diffuses from a random edge. Looking back restores clarity automatically; enable hold or identity verification to require manual confirmation instead.
 
 This estimates **head orientation, not exact eye gaze**. Eye-only movements may be missed; lighting, glasses, pose and multiple faces affect reliability. It is not a security or privacy lock. Camera interruption clears the overlay and stops monitoring.
 

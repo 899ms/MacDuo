@@ -49,13 +49,16 @@ import Cocoa
  func menuWillOpen(_ menu:NSMenu) {
   menuIsOpen=true;hingeSound.stop();if !attentionHold.locked {attentionAmount=0};attentionSuppressedUntil=ProcessInfo.processInfo.systemUptime+2
   if !attentionHold.locked && (state.phase == .capturing || state.phase == .folding) {
-   clearFoldResources();state.yieldToUser()
+   // Attention mode must re-arm at its fixed reference; yielding here would raise the session
+   // baseline to the trigger angle and the blur could never be requested again.
+   if attentionMode {attentionRearm()} else {clearFoldResources();state.yieldToUser()}
   }
   refreshStatusMenu()
  }
  func menuDidClose(_ menu:NSMenu) {
   menuIsOpen=false;lastInputActivity=InputActivity.current()
-  attentionSuppressedUntil=ProcessInfo.processInfo.systemUptime+1
+  let now=ProcessInfo.processInfo.systemUptime
+  attentionIdle.inputObserved(at:now);attentionSuppressedUntil=now+1
  }
  @objc func toggleMonitoring() {
   if lifecycle.enabled {

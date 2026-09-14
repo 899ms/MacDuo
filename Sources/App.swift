@@ -58,6 +58,13 @@ class DesktopPanel: NSPanel {
  var attentionMonitor:AttentionMonitor?
  var attentionTicket=UUID()
  var attentionGate=AttentionGate()
+ var attentionIdle=AttentionIdleGate()
+ // Attention mode has no hinge. It drives the fold session between two fixed angles, so every
+ // re-arm must return to the reference; re-arming at the trigger angle would wedge it shut.
+ static let attentionReference=100.0
+ static let attentionTriggerAngle=50.0
+ var attentionReference:Double {DesktopApp.attentionReference}
+ var attentionTriggerAngle:Double {DesktopApp.attentionTriggerAngle}
  var attentionLastSample=0.0
  var attentionSuppressedUntil=0.0
  var attentionAmount:Float=0
@@ -302,6 +309,12 @@ class DesktopPanel: NSPanel {
   guard changed else { return }
   let wasShowing=state.phase == .capturing || state.phase == .folding
   guard wasShowing || state.phase == .armed else { return }
+  if attentionMode {
+   attentionIdle.inputObserved(at:ProcessInfo.processInfo.systemUptime)
+   attentionRearm()
+   if wasShowing {activityText="已恢复清晰桌面 · 离开后重新计时"}
+   return
+  }
   if wasShowing { clearFoldResources() }
   state.yieldToUser()
   if wasShowing {
@@ -445,6 +458,12 @@ class DesktopPanel: NSPanel {
    delayed.sample(facing:false,at:1);delayed.sample(facing:false,at:30)
    precondition(!delayed.away)
    delayed.sample(facing:false,at:31.1);precondition(delayed.away)
+   // Without verification, looking back clears the blur on its own.
+   var glance=AttentionHold()
+   glance.update(away:true,started:1,keep:false)
+   precondition(glance.since != nil && !glance.locked)
+   glance.update(away:false,started:9,keep:false)
+   precondition(glance.since == nil && !glance.locked,"Returning restores clarity with no confirmation")
    var held=AttentionHold()
    held.update(away:true,started:1,keep:true)
    held.update(away:false,started:40,keep:true)
@@ -477,7 +496,52 @@ class DesktopPanel: NSPanel {
    app.statusMenu.performActionForItem(at:app.statusMenu.index(of:foldItem))
    precondition(!app.attentionMode && foldItem.state == .on && attentionItem.state == .off,"Native menu action switches back")
 
-   print("PASS: attention calibration, glance rejection, return, 100 cycles, mode selection and camera failure cleanup")
+   // Blurring waits for look-away AND input idleness; either one breaking restarts the countdown.
+   var idle=AttentionIdleGate();idle.delay=10
+   idle.inputObserved(at:0)
+   precondition(!idle.ready(away:false,awaySince:0,at:100),"Facing the screen never blurs")
+   precondition(!idle.ready(away:true,awaySince:5,at:14),"Countdown runs from the later of the two")
+   precondition(idle.ready(away:true,awaySince:5,at:15),"Away and idle together reach the delay")
+   idle.inputObserved(at:14)
+   precondition(!idle.ready(away:true,awaySince:5,at:23),"Typing while turned away restarts the countdown")
+   precondition(idle.ready(away:true,awaySince:5,at:24))
+   // The immediate setting still waits for confirmed absence, never for a countdown.
+   var instant=AttentionIdleGate();instant.delay=0
+   instant.inputObserved(at:3)
+   precondition(!instant.ready(away:false,awaySince:0,at:5))
+   precondition(instant.ready(away:true,awaySince:5,at:5),"Zero delay blurs as soon as absence is confirmed")
+   instant.inputObserved(at:6)
+   precondition(instant.ready(away:true,awaySince:5,at:6),"Zero delay has no countdown for input to restart")
+   // Working at the machine for an hour with the head turned away must never blur it.
+   for minute in 0..<60 {
+    for second in stride(from:0.0,to:60.0,by:3) {
+     let t=Double(minute)*60+second
+     precondition(!idle.ready(away:true,awaySince:0,at:t+2),"Continuous input keeps the desktop sharp")
+     idle.inputObserved(at:t+3)
+    }
+   }
+   // Attention mode re-arms at its fixed reference. A menu interaction mid-blur must not raise
+   // the session baseline to the trigger angle, which would wedge the trigger shut for good.
+   let stall=DesktopApp();stall.showsControls=false;stall.setAttentionMode(true)
+   stall.state.arm(angle:DesktopApp.attentionReference)
+   stall.state.sample(DesktopApp.attentionTriggerAngle)
+   precondition(stall.state.phase == .capturing)
+   stall.menuWillOpen(stall.statusMenu);stall.menuDidClose(stall.statusMenu)
+   precondition(stall.state.phase == .armed && stall.state.baseline==DesktopApp.attentionReference,"Menu interaction restores the reference")
+   for _ in 0..<50 {
+    stall.state.sample(DesktopApp.attentionTriggerAngle)
+    precondition(stall.state.phase == .capturing,"Blur can still be requested after the menu closes")
+    stall.attentionRearm()
+    precondition(stall.state.phase == .armed && stall.state.baseline==DesktopApp.attentionReference)
+   }
+   // The same holds for input arriving while a capture is in flight.
+   stall.state.sample(DesktopApp.attentionTriggerAngle);stall.state.captured()
+   stall.lastInputActivity=InputActivity(counts:[0])
+   stall.observeInputActivity(InputActivity(counts:[1]))
+   precondition(stall.state.phase == .armed && stall.state.baseline==DesktopApp.attentionReference,"Input mid-capture restores the reference")
+   stall.state.sample(DesktopApp.attentionTriggerAngle);precondition(stall.state.phase == .capturing)
+
+   print("PASS: attention calibration, glance rejection, return, 100 cycles, idle-gated blur, re-arm after menu and input, mode selection and camera failure cleanup")
    exit(0)
   }
   if args.contains("--test-hinge-sound") {
