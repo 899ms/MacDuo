@@ -51,6 +51,9 @@ final class DesktopPanel: NSPanel {
  var showsControls=true
  var attentionMode=false
  let modePicker=NSPopUpButton()
+ let directionPicker=NSPopUpButton()
+ var attentionDirection:Int {UserDefaults.standard.integer(forKey:"attentionDirection") == 1 ? 1 : 0}
+ var attentionLastTick=0.0
  var attentionMonitor:AttentionMonitor?
  var attentionTicket=UUID()
  var attentionGate=AttentionGate()
@@ -59,7 +62,7 @@ final class DesktopPanel: NSPanel {
  var attentionAmount:Float=0
 
  func applicationDidFinishLaunching(_ notification: Notification) {
-  window=NSWindow(contentRect:NSRect(x:0,y:0,width:460,height:410),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
+  window=NSWindow(contentRect:NSRect(x:0,y:0,width:460,height:450),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
   window.title="MacDuo"; window.isReleasedWhenClosed=false; window.delegate=self
   let stack=NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing=18
   stack.translatesAutoresizingMaskIntoConstraints=false; window.contentView!.addSubview(stack)
@@ -68,7 +71,10 @@ final class DesktopPanel: NSPanel {
   startButton=NSButton(title:"选择屏幕并开始",target:self,action:#selector(start)); startButton.bezelStyle = .rounded; startButton.controlSize = .large
   modePicker.addItems(withTitles:["合盖模式", "注视模式 · 使用摄像头"])
   modePicker.target=self;modePicker.action=#selector(changeMode(_:))
-  for view in [title,modePicker,detail,startButton!,message] { stack.addArrangedSubview(view) }
+  directionPicker.addItems(withTitles:["模糊扩散：从左到右", "模糊扩散：从上到下"])
+  directionPicker.selectItem(at:attentionDirection);directionPicker.isHidden=true
+  directionPicker.target=self;directionPicker.action=#selector(changeAttentionDirection(_:))
+  for view in [title,modePicker,directionPicker,detail,startButton!,message] { stack.addArrangedSubview(view) }
   let menuButton=NSButton(title:"菜单栏控制…",target:self,action:#selector(openStatusMenu));menuButton.bezelStyle = .rounded
   stack.addArrangedSubview(menuButton)
   let menu=NSMenu(), root=NSMenuItem(), appMenu=NSMenu()
@@ -329,6 +335,7 @@ final class DesktopPanel: NSPanel {
     guard ticket==generation, lifecycle.canMonitor, state.phase == .capturing, !Task.isCancelled else{return}
     captureTimeout?.cancel(); captureTimeout=nil
     engine.params.mode=attentionMode ? 6 : 0
+    if attentionMode {engine.params.padding=Float(attentionDirection)}
     engine.params.progress=attentionMode ? 0 : Float(state.progress)
     renderer=engine; state.captured(); showOverlay()
     record(String(format:"fold visible; preparation %.0f ms",(ProcessInfo.processInfo.systemUptime-captureStarted)*1000))
@@ -703,6 +710,21 @@ final class DesktopPanel: NSPanel {
     precondition(Array(attentionBlur[lowerStart...]) != Array(flat[lowerStart...]),"Attention mode must blur lower screen too")
     engine.params.progress=0
     precondition(engine.pixels(width:640,height:400)==flat,"Attention reversal restores original")
+    for direction:Float in [0,1] {
+     engine.params.padding=direction;engine.params.progress=0.5
+     let half=engine.pixels(width:640,height:400)
+     var changedNear=false
+     for y in 0..<400 {for x in 0..<640 {
+      let coordinate=direction==0 ? Float(x)/640 : Float(y)/400
+      let i=(y*640+x)*4
+      if coordinate>0.75 {precondition(Array(half[i..<i+4])==Array(flat[i..<i+4]),"Diffusion must leave far side clear")}
+      if coordinate<0.25 && Array(half[i..<i+4]) != Array(flat[i..<i+4]) {changedNear=true}
+     }}
+     precondition(changedNear,"Diffusion starts at selected edge")
+     engine.params.progress=1
+     precondition(engine.pixels(width:640,height:400)==attentionBlur,"Both directions finish with the same full blur")
+    }
+
     print("PASS: angle changes frost coverage, uncovered pixels stay sharp, stationary desktop and reversible material")
     try! pair.1.fileHandleForWriting.close();pair.0.waitUntilExit();exit(0)
    }catch{print(error);exit(1)}

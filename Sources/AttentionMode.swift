@@ -2,14 +2,18 @@ import Cocoa
 import AVFoundation
 
 @MainActor extension DesktopApp {
+ @objc func changeAttentionDirection(_ sender:NSPopUpButton) {
+  UserDefaults.standard.set(sender.indexOfSelectedItem,forKey:"attentionDirection")
+  if attentionMode {clearFoldResources();state.arm(angle:100);attentionAmount=0;attentionSuppressedUntil=ProcessInfo.processInfo.systemUptime+0.3}
+ }
  @objc func changeMode(_ sender:NSPopUpButton) {setAttentionMode(sender.indexOfSelectedItem==1)}
  @objc func chooseFoldMode() {setAttentionMode(false)}
  @objc func chooseAttentionMode() {setAttentionMode(true)}
  func setAttentionMode(_ enabled:Bool) {
   guard attentionMode != enabled else{return}
   let resume=lifecycle.enabled
-  suspendMonitoring();attentionMode=enabled;modePicker.selectItem(at:enabled ? 1:0)
-  detail.stringValue=enabled ? "看向屏幕时清晰，转头或离开约 1 秒后全屏渐渐模糊。仅开启本模式时使用内置摄像头，本地判断人脸朝向，不保存画面。不是精确眼球追踪。移动鼠标或按键可临时恢复。" : "合盖越多，毛玻璃向下覆盖越多；打开时退回，未覆盖区域保持清晰。操作鼠标或键盘时恢复真实桌面。90 秒未折叠自动待机，再次合盖唤醒。"
+  suspendMonitoring();attentionMode=enabled;directionPicker.isHidden = !enabled;modePicker.selectItem(at:enabled ? 1:0)
+  detail.stringValue=enabled ? "看向屏幕时清晰，转头或离开约 1 秒后毛玻璃沿所选方向逐渐扩散。仅开启本模式时使用内置摄像头，本地判断人脸朝向，不保存画面。不是精确眼球追踪。移动鼠标或按键可临时恢复。" : "合盖越多，毛玻璃向下覆盖越多；打开时退回，未覆盖区域保持清晰。操作鼠标或键盘时恢复真实桌面。90 秒未折叠自动待机，再次合盖唤醒。"
   message.stringValue=enabled ? "开启后请先面向屏幕，等待识别就绪。" : "点击开始，选择 MacBook 内置屏幕，再缓慢合盖。"
   if resume {scheduleResume()}
   refreshStatusMenu()
@@ -48,6 +52,8 @@ import AVFoundation
   }
  }
  func attentionTick(now:Double) {
+  let dt=attentionLastTick>0 ? min(0.1,max(0,now-attentionLastTick)) : 1.0/30
+  attentionLastTick=now
   guard now-attentionLastSample<8 else {end("摄像头画面中断，已恢复桌面并停止注视模式。请检查摄像头后重新开始。");return}
   let activity=InputActivity.current()
   if lastInputActivity != activity {
@@ -61,7 +67,7 @@ import AVFoundation
   if !shouldBlur,state.phase == .capturing {clearFoldResources();state.arm(angle:100)}
   if let engine=renderer {
    let previous=attentionAmount
-   attentionAmount=max(0,min(1,attentionAmount+(shouldBlur ? 1.0/15 : -1.0/6)))
+   attentionAmount=max(0,min(1,attentionAmount+Float(dt/(shouldBlur ? 0.9 : -0.45))))
    if attentionAmount != previous {engine.params.progress=attentionAmount;canvas?.draw()}
    if attentionAmount==0 {clearFoldResources();state.arm(angle:100)}
   }

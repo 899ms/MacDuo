@@ -33,7 +33,11 @@ vertex Varying foldVertex(uint id [[vertex_id]],const device float2 *grid [[buff
 fragment float4 foldFragment(Varying in [[stage_in]],bool front [[front_facing]],texture2d<float> sharp [[texture(0)]],texture2d<float> blurred [[texture(1)]],texture2d<float> lightBlur [[texture(2)]],constant Params &p [[buffer(1)]]) {
  constexpr sampler s(filter::linear,address::clamp_to_edge);
  if(p.mode>5.5) {
-  float amount=smoothstep(0.0,1.0,clamp(p.progress,0.0,1.0));
+  float progress=smoothstep(0.0,1.0,clamp(p.progress,0.0,1.0));
+  float coordinate=p.padding>0.5 ? in.uv.y : in.uv.x;
+  // Soft diffusion front: clear at zero, fully frosted at one, no light stripe.
+  float front=mix(-.18,1.18,progress);
+  float amount=1-smoothstep(front-.18,front+.18,coordinate);
   float3 original=sharp.sample(s,in.uv).rgb;
   float3 soft=mix(lightBlur.sample(s,in.uv).rgb,blurred.sample(s,in.uv).rgb,.95);
   return float4(mix(original,soft,amount),1);

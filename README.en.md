@@ -82,3 +82,7 @@ By Berryxia · [X](https://x.com/Berryxia) · [andyhuo@me.com](mailto:andyhuo@me
 Inspired by duo.grok.me. Angular fitting and portions of historical geometry derive from [Bendable](https://github.com/opensourcevillain/Bendable), with its MIT license preserved. Independent project; not affiliated with Apple.
 
 [MIT](LICENSE) · [Third-party and artwork notices](THIRD_PARTY_NOTICES.md)
+
+### 1.1.1 Directional diffusion
+
+Attention mode supports left-to-right (default) or top-to-bottom diffusion, saved across launches. Frost spreads over approximately 0.9 seconds and retreats over 0.45 seconds when you face the screen. The soft front has no illuminated scan line; untouched areas remain sharp.

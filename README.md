@@ -95,3 +95,7 @@ Berryxia · [X](https://x.com/Berryxia) · [andyhuo@me.com](mailto:andyhuo@me.co
 灵感来源：duo.grok.me。角度拟合及部分早期几何实现参考 [Bendable](https://github.com/opensourcevillain/Bendable)，保留其 MIT 许可。MacDuo 为独立项目，与 Apple 无关联。
 
 [MIT License](LICENSE) · [第三方及素材说明](THIRD_PARTY_NOTICES.md)
+
+### 1.1.1 方向扩散
+
+注视模式新增「模糊扩散」选项：默认从左到右，可选从上到下，选择会保存。转开后约 0.9 秒逐渐铺开，回看时约 0.45 秒反向退去；边缘柔和，没有发光扫描线，未到达区域保持清晰。
