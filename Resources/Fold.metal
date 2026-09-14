@@ -32,6 +32,12 @@ vertex Varying foldVertex(uint id [[vertex_id]],const device float2 *grid [[buff
 }
 fragment float4 foldFragment(Varying in [[stage_in]],bool front [[front_facing]],texture2d<float> sharp [[texture(0)]],texture2d<float> blurred [[texture(1)]],texture2d<float> lightBlur [[texture(2)]],constant Params &p [[buffer(1)]]) {
  constexpr sampler s(filter::linear,address::clamp_to_edge);
+ if(p.mode>5.5) {
+  float amount=smoothstep(0.0,1.0,clamp(p.progress,0.0,1.0));
+  float3 original=sharp.sample(s,in.uv).rgb;
+  float3 soft=mix(lightBlur.sample(s,in.uv).rgb,blurred.sample(s,in.uv).rgb,.95);
+  return float4(mix(original,soft,amount),1);
+ }
  // Desktop Duo is a lid-driven frosted cover: retain the original page coordinates.
  if(p.mode<.5) {
   // The cover advances with the lid instead of occupying a fixed half-screen rectangle.

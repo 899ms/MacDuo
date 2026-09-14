@@ -15,3 +15,9 @@
 ## Manual validation
 
 Use a supported MacBook: select its built-in display, close/open repeatedly, interrupt a gesture with input, remain at a fixed angle, wait 90 seconds and retrigger, sleep/lock/unlock and repeat. Check pause remains paused after wake. If system screen sharing expires, verify the app requests a new selection. Never infer these results from synthetic tests alone.
+
+## Attention mode
+
+`AttentionMonitor.swift` serializes AVFoundation capture and Vision face-rectangle requests on a utility queue. Only the built-in camera is selected. The largest sufficiently confident face supplies yaw/pitch; thresholds are 0.38/0.32 radians. Frame analysis is capped at 5 Hz and late video frames are dropped. No identity model or frame persistence is used.
+
+`AttentionGate` requires 0.5 seconds facing forward before activation, 1 second away before obscuring, and 0.2 seconds facing forward before revealing. `AttentionMode.swift` owns permission handling with generation tokens, input suppression and gradual full-screen blur via Metal mode 6. Unchanging blur frames are not redrawn. Snapshot capture remains single-frame, background-prepared and cancellable. An 8-second sample timeout fails clear and stops monitoring. Lock/sleep and explicit pause invalidate pending callbacks and stop the camera. The default mode is still lid mode and selecting attention mode while stopped never starts the camera.

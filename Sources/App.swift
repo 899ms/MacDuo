@@ -49,16 +49,26 @@ final class DesktopPanel: NSPanel {
  var unlockReference:Double?
  var standby=CaptureStandby()
  var showsControls=true
+ var attentionMode=false
+ let modePicker=NSPopUpButton()
+ var attentionMonitor:AttentionMonitor?
+ var attentionTicket=UUID()
+ var attentionGate=AttentionGate()
+ var attentionLastSample=0.0
+ var attentionSuppressedUntil=0.0
+ var attentionAmount:Float=0
 
  func applicationDidFinishLaunching(_ notification: Notification) {
-  window=NSWindow(contentRect:NSRect(x:0,y:0,width:420,height:330),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
+  window=NSWindow(contentRect:NSRect(x:0,y:0,width:460,height:410),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
   window.title="MacDuo"; window.isReleasedWhenClosed=false; window.delegate=self
   let stack=NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing=18
   stack.translatesAutoresizingMaskIntoConstraints=false; window.contentView!.addSubview(stack)
   NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:24)])
   let title=NSTextField(labelWithString:"MacDuo"); title.font = .systemFont(ofSize:22,weight:.semibold)
   startButton=NSButton(title:"选择屏幕并开始",target:self,action:#selector(start)); startButton.bezelStyle = .rounded; startButton.controlSize = .large
-  for view in [title,detail,startButton!,message] { stack.addArrangedSubview(view) }
+  modePicker.addItems(withTitles:["合盖模式", "注视模式 · 使用摄像头"])
+  modePicker.target=self;modePicker.action=#selector(changeMode(_:))
+  for view in [title,modePicker,detail,startButton!,message] { stack.addArrangedSubview(view) }
   let menuButton=NSButton(title:"菜单栏控制…",target:self,action:#selector(openStatusMenu));menuButton.bezelStyle = .rounded
   stack.addArrangedSubview(menuButton)
   let menu=NSMenu(), root=NSMenuItem(), appMenu=NSMenu()
@@ -128,6 +138,8 @@ final class DesktopPanel: NSPanel {
   state=FoldSession();fit.reset();mailbox=AngleMailbox();lastInputActivity=nil
  }
  func stopMonitoring() {
+  attentionTicket=UUID();attentionMonitor?.stop();attentionMonitor=nil
+  attentionGate=AttentionGate();attentionAmount=0
   hingeSound.stop()
   timer?.invalidate();timer=nil
   if let process=sensor,process.isRunning {process.terminate()};sensor=nil;sensorPipe=nil
@@ -190,6 +202,7 @@ final class DesktopPanel: NSPanel {
  }
  func startMonitoring(on target: NSScreen) {
   guard lifecycle.canMonitor,timer == nil else{return}
+  if attentionMode {startAttentionMonitoring();return}
   state=FoldSession();fit.reset();mailbox=AngleMailbox()
   standby=CaptureStandby(now:ProcessInfo.processInfo.systemUptime)
   record("monitoring started")
@@ -219,6 +232,7 @@ final class DesktopPanel: NSPanel {
  func tick() {
   guard lifecycle.canMonitor else {suspendMonitoring();return}
   beat(); let now=ProcessInfo.processInfo.systemUptime
+  if attentionMode {attentionTick(now:now);return}
   if let (raw,time)=mailbox.take() {
    lastSample=time;sensorFailures=0; let angle=fit.update(angle:raw,at:time).angle
    if state.phase == .idle {
@@ -314,7 +328,8 @@ final class DesktopPanel: NSPanel {
     observeInputActivity(InputActivity.current())
     guard ticket==generation, lifecycle.canMonitor, state.phase == .capturing, !Task.isCancelled else{return}
     captureTimeout?.cancel(); captureTimeout=nil
-    engine.params.progress=Float(state.progress)
+    engine.params.mode=attentionMode ? 6 : 0
+    engine.params.progress=attentionMode ? 0 : Float(state.progress)
     renderer=engine; state.captured(); showOverlay()
     record(String(format:"fold visible; preparation %.0f ms",(ProcessInfo.processInfo.systemUptime-captureStarted)*1000))
    } catch {
@@ -389,6 +404,36 @@ final class DesktopPanel: NSPanel {
   let args=CommandLine.arguments
   if args.contains("--sensor") { runSensor() }
   if let i=args.firstIndex(of:"--watch-parent"),args.count>i+1,let pid=Int32(args[i+1]) { runWatchdog(parent:pid) }
+  if args.contains("--test-attention") {
+   var gate=AttentionGate()
+   for t in stride(from:0.0,through:2.0,by:0.2) {gate.sample(facing:false,at:t)}
+   precondition(!gate.calibrated && !gate.away,"No blind activation before calibration")
+   gate.sample(facing:true,at:3);gate.sample(facing:true,at:3.6)
+   precondition(gate.calibrated && !gate.away)
+   gate.sample(facing:false,at:4);gate.sample(facing:true,at:4.6)
+   precondition(!gate.away,"Brief glance should remain clear")
+   gate.sample(facing:false,at:5);gate.sample(facing:false,at:6.1)
+   precondition(gate.away,"Sustained look-away blurs")
+   gate.sample(facing:true,at:7);gate.sample(facing:true,at:7.3)
+   precondition(!gate.away,"Return restores desktop")
+   for i in 0..<100 {
+    let t=10+Double(i)*4
+    gate.sample(facing:false,at:t);gate.sample(facing:false,at:t+1.1)
+    precondition(gate.away)
+    gate.sample(facing:true,at:t+2);gate.sample(facing:true,at:t+2.3)
+    precondition(!gate.away)
+   }
+   let app=DesktopApp();app.showsControls=false
+   app.setAttentionMode(true)
+   precondition(app.attentionMonitor == nil && app.timer == nil,"Selecting mode alone never starts camera")
+   app.lifecycle.enable();app.attentionLastSample=0
+   app.attentionTick(now:9)
+   precondition(!app.lifecycle.enabled && app.renderer == nil,"Camera interruption fails clear and stops")
+   app.setAttentionMode(false)
+   precondition(!app.attentionMode && app.attentionMonitor == nil)
+   print("PASS: attention calibration, glance rejection, return, 100 cycles, mode selection and camera failure cleanup")
+   exit(0)
+  }
   if args.contains("--test-hinge-sound") {
    var gate=HingeMotion()
    precondition(!gate.sample(80,at:0))
@@ -650,6 +695,14 @@ final class DesktopPanel: NSPanel {
       precondition(max(frame[i],max(frame[i+1],frame[i+2]))>10,"Black hole behind upper panel")
      }}
     }
+    engine.params.mode=6;engine.params.progress=0
+    precondition(engine.pixels(width:640,height:400)==flat,"Attention clear state must match original")
+    engine.params.progress=1
+    let attentionBlur=engine.pixels(width:640,height:400)
+    precondition(attentionBlur != flat)
+    precondition(Array(attentionBlur[lowerStart...]) != Array(flat[lowerStart...]),"Attention mode must blur lower screen too")
+    engine.params.progress=0
+    precondition(engine.pixels(width:640,height:400)==flat,"Attention reversal restores original")
     print("PASS: angle changes frost coverage, uncovered pixels stay sharp, stationary desktop and reversible material")
     try! pair.1.fileHandleForWriting.close();pair.0.waitUntilExit();exit(0)
    }catch{print(error);exit(1)}

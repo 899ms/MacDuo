@@ -74,7 +74,7 @@ final class FoldEngine:NSObject,MTKViewDelegate {
   var p=params;p.aspect=Float(target.width)/Float(target.height)
   encoder.setRenderPipelineState(pipeline);encoder.setDepthStencilState(depth);encoder.setFrontFacing(.counterClockwise);encoder.setCullMode(.none)
   encoder.setVertexBuffer(vertices,offset:0,index:0);encoder.setVertexBytes(&p,length:MemoryLayout<FoldParams>.stride,index:1);encoder.setFragmentBytes(&p,length:MemoryLayout<FoldParams>.stride,index:1);encoder.setFragmentTexture(sharp,index:0);encoder.setFragmentTexture(blurred,index:1);encoder.setFragmentTexture(lightBlur,index:2)
-  if p.mode<0.5 {
+  if p.mode<0.5 || p.mode>5.5 {
    encoder.setRenderPipelineState(desktopPipeline)
    encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:count)
   } else {

@@ -9,6 +9,14 @@ A native macOS menu bar experiment that turns your MacBook's lid angle into a so
 
 **The images are AI-generated concept illustrations, not screenshots.** MacDuo does not bend the screen hardware or geometrically fold your page. It renders a stationary desktop snapshot with an angle-driven glass veil.
 
+## Attention mode — experimental in 1.1.0
+
+Choose **注视模式 · 使用摄像头** in the controller, start screen sharing and allow camera access. Face the screen for about half a second to become ready. Looking away for roughly one second gradually blurs the whole screen; facing it again restores clarity. Mouse/keyboard input immediately yields the desktop and suppresses blur for two seconds.
+
+This estimates **head orientation, not exact eye gaze**. Eye-only movements may be missed; lighting, glasses, pose and multiple faces affect reliability. It is not a security or privacy lock. Camera interruption clears the overlay and stops monitoring.
+
+Camera frames are processed locally at about 5 Hz using Vision at 640×480. No recording, uploads, identity recognition or microphone use. Pause, switching to lid mode, lock and quit stop capture. The camera stays active while attention mode is enabled so it can detect your return; the lid mode's 90-second standby rule does not apply.
+
 ## Features
 
 - About 3° of closing motion triggers a fresh, single desktop snapshot.
@@ -63,7 +71,7 @@ Tests cover repeated gestures, input handoff, standby, lifecycle recovery, menu 
 
 Swift/AppKit manages the app, IOKit reads the lid sensor, ScreenCaptureKit captures a single frame, Core Image prepares blur textures, and Metal renders the stationary cover. Sensor and watchdog workers run as separate processes.
 
-No camera, microphone, network access or saved desktop screenshots. Input detection compares event counts without reading typed content. Local lifecycle, angle and error logs live at `~/Library/Logs/DuoFoldDesktop/lifecycle.log`. The watchdog can terminate an unresponsive app, but cannot guarantee recovery from system-level GPU or kernel failures.
+Lid mode does not use the camera. Attention mode uses it only while enabled. No microphone, network access or saved desktop screenshots. Input detection compares event counts without reading typed content. Local lifecycle, angle and error logs live at `~/Library/Logs/DuoFoldDesktop/lifecycle.log`. The watchdog can terminate an unresponsive app, but cannot guarantee recovery from system-level GPU or kernel failures.
 
 See [architecture](docs/ARCHITECTURE.md) and [contributing](CONTRIBUTING.md).
 
