@@ -27,6 +27,10 @@ import Cocoa
   item.menu=statusMenu;statusItem=item;refreshStatusMenu()
  }
  func refreshStatusMenu() {
+  for item in statusMenu.items {
+   if item.action == #selector(chooseFoldMode) {item.state=attentionMode ? .off:.on;item.isEnabled = !selecting}
+   if item.action == #selector(chooseAttentionMode) {item.state=attentionMode ? .on:.off;item.isEnabled = !selecting}
+  }
   soundItem.isEnabled=hingeSound.audioURL != nil
   soundItem.title=hingeSound.audioURL == nil ? "开盖音效（未安装音频）" : "开盖音效"
   soundItem.state=hingeSound.enabled ? .on : .off
@@ -37,7 +41,7 @@ import Cocoa
    menuStatus.title=standby.resting ? "待机 · 再次合盖自动唤醒" : (state.phase == .folding ? "正在折叠" : "已开启 · 等待合盖")
   } else {menuStatus.title=filter == nil ? "尚未开始" : "已暂停"}
   menuDetail.title=activityText
-  menuDetail.isHidden = !lifecycle.canMonitor || state.phase == .idle
+  menuDetail.isHidden = !lifecycle.canMonitor || state.phase == .idle || menuDetail.title==menuStatus.title
   toggleItem.title=lifecycle.enabled ? "暂停折叠" : (filter == nil ? "开始折叠…" : "恢复折叠")
   toggleItem.isEnabled = !selecting
   statusItem?.button?.toolTip="MacDuo · "+menuStatus.title
@@ -51,6 +55,7 @@ import Cocoa
  }
  func menuDidClose(_ menu:NSMenu) {
   menuIsOpen=false;lastInputActivity=InputActivity.current()
+  attentionSuppressedUntil=ProcessInfo.processInfo.systemUptime+1
  }
  @objc func toggleMonitoring() {
   if lifecycle.enabled {

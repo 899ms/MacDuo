@@ -3,15 +3,18 @@ import AVFoundation
 
 @MainActor extension DesktopApp {
  @objc func changeMode(_ sender:NSPopUpButton) {setAttentionMode(sender.indexOfSelectedItem==1)}
- @objc func chooseFoldMode() {setAttentionMode(false)}
- @objc func chooseAttentionMode() {setAttentionMode(true)}
+ @objc func chooseFoldMode() {setAttentionMode(false);showController()}
+ @objc func chooseAttentionMode() {setAttentionMode(true);showController()}
  func setAttentionMode(_ enabled:Bool) {
-  guard attentionMode != enabled else{return}
+  guard attentionMode != enabled else {refreshStatusMenu();return}
   let resume=lifecycle.enabled
   suspendMonitoring();attentionMode=enabled;attentionPreferences.isHidden = !enabled;modePicker.selectItem(at:enabled ? 1:0)
   detail.stringValue=enabled ? "看向屏幕时清晰，达到设定的离开时间后毛玻璃沿随机方向缓缓流动扩散。仅开启本模式时使用内置摄像头，本地判断人脸朝向，不保存画面。不是精确眼球追踪。保持模糊时需要确认恢复；未保持时鼠标或按键可临时恢复。" : "合盖越多，毛玻璃向下覆盖越多；打开时退回，未覆盖区域保持清晰。操作鼠标或键盘时恢复真实桌面。90 秒未折叠自动待机，再次合盖唤醒。"
   message.stringValue=enabled ? "开启后请先面向屏幕，等待识别就绪。" : "点击开始，选择 MacBook 内置屏幕，再缓慢合盖。"
-  if resume {scheduleResume()}
+  activityText=enabled ? "已切换到注视模式 · 正在准备" : "已切换到合盖模式 · 正在准备"
+  if resume {message.stringValue=activityText;scheduleResume()}
+  else {activityText=enabled ? "注视模式 · 尚未开始" : "合盖模式 · 尚未开始"}
+  record(enabled ? "mode changed: attention" : "mode changed: lid")
   refreshStatusMenu()
  }
  func startAttentionMonitoring() {
@@ -51,7 +54,9 @@ import AVFoundation
   let dt=attentionLastTick>0 ? min(0.1,max(0,now-attentionLastTick)) : 1.0/30
   attentionLastTick=now
   guard now-attentionLastSample<8 else {end("摄像头画面中断，已恢复桌面并停止注视模式。请检查摄像头后重新开始。");return}
-  attentionHold.update(away:attentionGate.calibrated && attentionGate.away,started:attentionGate.since,keep:AttentionPreferences.keepsBlur)
+  // Menu tracking must never latch a new cover or raise an input-taking panel.
+  if menuIsOpen {lastInputActivity=InputActivity.current();return}
+  attentionHold.update(away:attentionGate.calibrated && attentionGate.away && now>=attentionSuppressedUntil,started:attentionGate.since,keep:AttentionPreferences.keepsBlur)
   let activity=InputActivity.current()
   if !attentionHold.locked,lastInputActivity != activity {
    lastInputActivity=activity;attentionSuppressedUntil=now+2

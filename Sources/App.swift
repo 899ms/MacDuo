@@ -217,6 +217,7 @@ class DesktopPanel: NSPanel {
   if attentionMode {startAttentionMonitoring();return}
   state=FoldSession();fit.reset();mailbox=AngleMailbox()
   standby=CaptureStandby(now:ProcessInfo.processInfo.systemUptime)
+  message.stringValue="合盖模式已开启。缓慢合盖即可触发，菜单栏可切换模式。"
   record("monitoring started")
   let pair=startWatchdog(); guardProcess=pair.0; heartbeat=pair.1
   lastSample=ProcessInfo.processInfo.systemUptime
@@ -459,6 +460,23 @@ class DesktopPanel: NSPanel {
    precondition(!app.lifecycle.enabled && app.renderer == nil,"Camera interruption fails clear and stops")
    app.setAttentionMode(false)
    precondition(!app.attentionMode && app.attentionMonitor == nil)
+   app.setAttentionMode(true);app.lifecycle.enable();app.state.arm(angle:100)
+   app.attentionGate.calibrated=true;app.attentionGate.away=true
+   app.attentionLastSample=100;app.menuIsOpen=true
+   app.attentionTick(now:100)
+   precondition(!app.attentionHold.locked && app.state.phase == .armed && app.renderer == nil,"Menu tracking cannot latch or capture an overlay")
+   app.menuDidClose(app.statusMenu)
+   precondition(app.attentionSuppressedUntil>ProcessInfo.processInfo.systemUptime,"Menu selection gets input handoff time")
+   app.lifecycle.disable();app.setAttentionMode(false)
+   app.installStatusItem()
+   let foldItem=app.statusMenu.items.first{$0.action == #selector(DesktopApp.chooseFoldMode)}!
+   let attentionItem=app.statusMenu.items.first{$0.action == #selector(DesktopApp.chooseAttentionMode)}!
+   precondition(foldItem.state == .on && attentionItem.state == .off)
+   app.statusMenu.performActionForItem(at:app.statusMenu.index(of:attentionItem))
+   precondition(app.attentionMode && attentionItem.state == .on && foldItem.state == .off,"Native menu action switches and checks attention mode")
+   app.statusMenu.performActionForItem(at:app.statusMenu.index(of:foldItem))
+   precondition(!app.attentionMode && foldItem.state == .on && attentionItem.state == .off,"Native menu action switches back")
+
    print("PASS: attention calibration, glance rejection, return, 100 cycles, mode selection and camera failure cleanup")
    exit(0)
   }
