@@ -39,12 +39,24 @@ fragment float4 foldFragment(Varying in [[stage_in]],bool front [[front_facing]]
   // Broad, softly undulating material front. No luminous edge or scanning line.
   float wave=(.045*sin(along*6.283+progress*2.1)+.022*sin(along*11.0-progress*1.7))*sin(progress*3.14159265);
   float front=mix(-.24,1.24,progress)+wave;
-  float amount=1-smoothstep(front-.24,front+.24,coordinate);
+  // The leading edge must reach exactly zero ahead of the front (front max .567 at half
+  // progress; .567+.18<.75) while the trailing edge stays at -.24 so full progress still
+  // saturates to exactly 1 everywhere (front 1.24-.24=1.0).
+  float amount=1-smoothstep(front-.24,front+.18,coordinate);
   float rim=exp(-pow((coordinate-front)/.16,2.0))*sin(progress*3.14159265);
   float2 normal=p.padding<.5 ? float2(1,0) : (p.padding<1.5 ? float2(0,1) : (p.padding<2.5 ? float2(-1,0) : float2(0,-1)));
   float2 glassUV=in.uv+normal*(.009*rim*amount);
   float3 original=sharp.sample(s,in.uv).rgb;
-  float3 soft=mix(lightBlur.sample(s,glassUV).rgb,blurred.sample(s,glassUV).rgb,smoothstep(.05,.95,amount)*.95);
+  // Liquid glass, not dense fog: higher transmission, a luminous lift toward cool white and a
+  // broad static sheen. Everything is gated by amount so the clear state stays pixel-exact.
+  float3 soft=mix(lightBlur.sample(s,glassUV).rgb,blurred.sample(s,glassUV).rgb,smoothstep(.05,.95,amount)*.74);
+  // Freshness: blurring pools colors into grey, so give a gentle saturation recovery and a
+  // brighter cool-white transmission instead of a neutral haze.
+  float luma=dot(soft,float3(.299,.587,.114));
+  soft=clamp(mix(float3(luma),soft,1.14),0.0,1.0);
+  soft+=(1.0-soft)*(.10+.06*rim)*float3(.90,.97,1.0);
+  float band=exp(-pow((in.uv.x-.62*in.uv.y-.22)/.38,2.0))*.05;
+  soft+=band*(1.0-soft);
   return float4(mix(original,soft,amount),1);
  }
  // Desktop Duo is a lid-driven frosted cover: retain the original page coordinates.
@@ -61,11 +73,11 @@ fragment float4 foldFragment(Varying in [[stage_in]],bool front [[front_facing]]
   float rim=exp(-pow(lipDistance/.026,2.0));
   float2 refractedUV=in.uv+float2((in.uv.x-.5)*.005,-.010)*rim*haze;
   float3 fine=mix(original,lightBlur.sample(s,refractedUV).rgb,smoothstep(0.0,.55,haze));
-  float3 frost=mix(fine,blurred.sample(s,refractedUV).rgb,.70*smoothstep(.25,1.0,haze));
+  float3 frost=mix(fine,blurred.sample(s,refractedUV).rgb,.62*smoothstep(.25,1.0,haze));
   float3 color=mix(original,frost,.88);
   // Diffuse transmission only: no moving specular band or illuminated edge.
   // Coverage and refraction still follow the lid, with a soft natural boundary.
-  color+=(1-color)*(.025*haze)*float3(.90,.97,1.0);
+  color+=(1-color)*(.05*haze)*float3(.92,.97,1.0);
   return float4(color,1);
  }
 

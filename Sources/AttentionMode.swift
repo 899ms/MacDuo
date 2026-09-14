@@ -2,9 +2,16 @@ import Cocoa
 import AVFoundation
 
 @MainActor extension DesktopApp {
- @objc func changeMode(_ sender:NSPopUpButton) {setAttentionMode(sender.indexOfSelectedItem==1)}
- @objc func chooseFoldMode() {setAttentionMode(false);showController()}
- @objc func chooseAttentionMode() {setAttentionMode(true);showController()}
+ @objc func changeMode(_ sender:NSPopUpButton) {setAttentionMode(sender.indexOfSelectedItem==1);autoStartIfIdle()}
+ @objc func chooseFoldMode() {setAttentionMode(false);showController();autoStartIfIdle()}
+ @objc func chooseAttentionMode() {setAttentionMode(true);showController();autoStartIfIdle()}
+ /// Picking a mode means "use this now": present the screen picker when nothing is running yet,
+ /// instead of waiting for a separate start click that is easy to miss.
+ func autoStartIfIdle() {
+  guard startButton != nil, !lifecycle.enabled, !selecting, filter == nil else{return}
+  record("mode selected with nothing running; presenting screen picker")
+  start()
+ }
  func setAttentionMode(_ enabled:Bool) {
   guard attentionMode != enabled else {refreshStatusMenu();return}
   let resume=lifecycle.enabled
@@ -25,11 +32,18 @@ import AVFoundation
     guard let self=self,self.attentionTicket==ticket,self.attentionMode,self.lifecycle.canMonitor else{return}
     guard allowed else {self.end("摄像头未授权。请在系统设置 → 隐私与安全性 → 摄像头中允许 MacDuo，然后重新开始。");return}
     let monitor=AttentionMonitor();self.attentionMonitor=monitor
-    self.attentionGate=AttentionGate();self.attentionIdle=AttentionIdleGate();self.attentionIdle.delay=AttentionPreferences.delaySeconds;self.attentionIdle.inputObserved(at:ProcessInfo.processInfo.systemUptime);self.attentionLastSample=ProcessInfo.processInfo.systemUptime
+    self.workTally.load();self.attentionGate=AttentionGate();self.attentionIdle=AttentionIdleGate();self.attentionIdle.delay=AttentionPreferences.delaySeconds;self.attentionIdle.inputObserved(at:ProcessInfo.processInfo.systemUptime);self.attentionLastSample=ProcessInfo.processInfo.systemUptime
     monitor.onSample={ [weak self] facing in Task { @MainActor in
      guard let self=self,self.attentionTicket==ticket,self.lifecycle.canMonitor else{return}
      let now=ProcessInfo.processInfo.systemUptime
      self.attentionLastSample=now;self.attentionGate.sample(facing:facing,at:now)
+    }}
+    monitor.onDetail={ [weak self] detail in Task { @MainActor in
+     guard let self=self,self.attentionTicket==ticket else{return}
+     if detail.hasPrefix("cameras:") || detail.hasPrefix("using camera:") {self.record("attention "+detail);return}
+     self.attentionSampleCount += 1
+     if detail.hasSuffix("facing=Y") {self.attentionFacingCount += 1}
+     self.attentionLastDetail=detail
     }}
     monitor.onError={ [weak self] reason in Task { @MainActor in
      guard let self=self,self.attentionTicket==ticket else{return};self.end(reason)
@@ -41,6 +55,7 @@ import AVFoundation
     RunLoop.main.add(self.timer!,forMode:.common)
     self.activityText="注视模式 · 请面向屏幕进行识别"
     self.message.stringValue="注视模式已开启，摄像头仅在本机判断朝向。可在菜单栏暂停或切回合盖模式。"
+    self.record("attention monitoring started; camera authorized")
     self.refreshStatusMenu();monitor.start()
    }
   }
@@ -76,23 +91,43 @@ import AVFoundation
   let ready=attentionGate.calibrated && attentionIdle.ready(away:attentionGate.away,awaySince:attentionGate.since,at:now) && now>=attentionSuppressedUntil
   attentionHold.update(away:ready,started:absence,keep:AttentionPreferences.keepsBlur)
   let shouldBlur=attentionHold.locked || ready
+  // On-screen time counts only while calibrated, facing and unblurred; a shown blur ends
+  // the stretch, while a glance away merely pauses it.
+  if attentionGate.calibrated && !attentionGate.away && !shouldBlur {workTally.present(dt,at:now)}
+  if now-workSavedAt>=15 {workSavedAt=now;workTally.save()}
   if shouldBlur,state.phase == .armed {
    attentionDirection=Int.random(in:0...3)
+   attentionBlurShown=true
    state.sample(attentionTriggerAngle);capture()
   }
   if !shouldBlur,state.phase == .capturing {attentionRearm()}
   if let engine=renderer {
    let previous=attentionAmount
    attentionAmount=max(0,min(1,attentionAmount+Float(dt/(shouldBlur ? 1.6 : -0.7))))
-   if attentionAmount != previous {engine.params.progress=attentionAmount;canvas?.draw()}
-   if attentionAmount==0 {attentionRearm()}
+   if attentionAmount != previous {
+    engine.params.progress=attentionAmount;canvas?.draw()
+    CATransaction.begin();CATransaction.setDisableActions(true)
+    glassVideoLayer?.opacity=attentionAmount*0.95
+    glassAmbientLayer?.opacity=attentionAmount*0.45
+    CATransaction.commit()
+   }
+   if attentionAmount==0 {
+    if attentionBlurShown {workTally.endStretch();workTally.save();attentionBlurShown=false}
+    attentionRearm()
+   }
   }
   updateAttentionCard(now:now)
+  if attentionGate.calibrated && !attentionCalibratedLogged {attentionCalibratedLogged=true;record("attention calibrated; watching for absence")}
+  // While calibration is pending, say aloud what the camera judged, so a stall is diagnosable.
+  if !attentionGate.calibrated,now>=attentionDetailDue {
+   attentionDetailDue=now+10
+   record("attention awaiting calibration; samples=\(attentionSampleCount) facing=\(attentionFacingCount); last: "+attentionLastDetail)
+  }
   let text:String
   if !attentionGate.calibrated {text="注视模式 · 请面向屏幕进行识别"}
   else if shouldBlur {text="注视模式 · 已离开，毛玻璃显示"}
   else if attentionGate.away {text=String(format:"注视模式 · 已转开 %.0f 秒，%.0f 秒后模糊",max(0,now-absence),max(0,absence+attentionIdle.delay-now))}
-  else {text="注视模式 · 清晰显示"}
+  else {text=workTally.stretch>=60 ? "注视模式 · 清晰显示 · 已连续注视 "+WorkTally.phrase(workTally.stretch) : "注视模式 · 清晰显示"}
   if activityText != text {activityText=text;refreshStatusMenu()}
  }
 }

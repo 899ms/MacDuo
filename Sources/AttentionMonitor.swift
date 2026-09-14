@@ -30,14 +30,20 @@ final class AttentionMonitor:NSObject,AVCaptureVideoDataOutputSampleBufferDelega
  private var active=false
  private var lastFrame=0.0
  var onSample:((Bool)->Void)?
+ var onDetail:((String)->Void)?
  var onError:((String)->Void)?
  func start() {
   queue.async { [self] in
    active=true
    do {
-    guard let device=AVCaptureDevice.default(.builtInWideAngleCamera,for:.video,position:.unspecified) else {
+    let discovered=AVCaptureDevice.DiscoverySession(deviceTypes:[.builtInWideAngleCamera,.external,.continuityCamera],mediaType:.video,position:.unspecified).devices
+    onDetail?("cameras: "+discovered.map{"\($0.localizedName)[\($0.deviceType.rawValue)]"}.joined(separator:", "))
+    // Only the Mac's own FaceTime camera watches for presence — never a Continuity iPhone
+    // or Desk View feed, which look at the wrong thing entirely.
+    guard let device=discovered.first(where:{$0.deviceType == .builtInWideAngleCamera}) else {
      throw NSError(domain:"MacDuo",code:1,userInfo:[NSLocalizedDescriptionKey:"未找到内置摄像头"])
     }
+    onDetail?("using camera: \(device.localizedName)")
     let input=try AVCaptureDeviceInput(device:device)
     session.beginConfiguration();session.sessionPreset = .vga640x480
     let output=AVCaptureVideoDataOutput();output.alwaysDiscardsLateVideoFrames=true
@@ -89,6 +95,9 @@ final class AttentionMonitor:NSObject,AVCaptureVideoDataOutputSampleBufferDelega
      let yaw=face.yaw?.doubleValue ?? 0, pitch=face.pitch?.doubleValue ?? 0
      facing=face.boundingBox.width>=0.08 && abs(yaw)<0.60 && abs(pitch)<0.55
     } else {facing=false}
+    if let face=face {
+     onDetail?(String(format:"box=%.2f conf=%.2f yaw=%@ pitch=%@ facing=%@",face.boundingBox.width,face.confidence,face.yaw.map{String(format:"%.2f",$0.doubleValue)} ?? "nil",face.pitch.map{String(format:"%.2f",$0.doubleValue)} ?? "nil",facing ? "Y":"N"))
+    } else {onDetail?("no face")}
     onSample?(facing)
    } catch {onError?("人脸方向识别失败："+error.localizedDescription)}
   }

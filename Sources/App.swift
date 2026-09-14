@@ -1,4 +1,5 @@
 import Cocoa
+import AVFoundation
 import MetalKit
 import ScreenCaptureKit
 import LocalAuthentication
@@ -73,6 +74,21 @@ class DesktopPanel: NSPanel {
  var attentionRestoreNotice:String?
  var attentionAuthenticating=false
  var attentionAuthContext:LAContext?
+ var workTally=WorkTally()
+ var workSavedAt=0.0
+ var attentionBlurShown=false
+ var attentionCalibratedLogged=false
+ var attentionSampleCount=0
+ var attentionFacingCount=0
+ var attentionLastDetail="(无采样)"
+ var attentionDetailDue=0.0
+ var glassPlayer:AVQueuePlayer?
+ var glassLooper:AVPlayerLooper?
+ weak var glassVideoLayer:AVPlayerLayer?
+ weak var glassAmbientLayer:AVPlayerLayer?
+ var glassVideoStartedAt=0.0
+ var glassVideoDuration=13.0
+ var attentionCardShownAt=0.0
 
  func applicationDidFinishLaunching(_ notification: Notification) {
   window=NSWindow(contentRect:NSRect(x:0,y:0,width:460,height:690),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
@@ -156,6 +172,8 @@ class DesktopPanel: NSPanel {
   state=FoldSession();fit.reset();mailbox=AngleMailbox();lastInputActivity=nil
  }
  func stopMonitoring() {
+  workTally.save();attentionCalibratedLogged=false
+  attentionSampleCount=0;attentionFacingCount=0;attentionLastDetail="(无采样)";attentionDetailDue=0
   attentionTicket=UUID();attentionMonitor?.stop();attentionMonitor=nil
   attentionGate=AttentionGate();attentionAmount=0;attentionHold.reset();attentionRestoreNotice=nil
   attentionAuthContext?.invalidate();attentionAuthContext=nil;attentionAuthenticating=false
@@ -375,7 +393,55 @@ class DesktopPanel: NSPanel {
   v.delegate=engine; v.colorPixelFormat = .bgra8Unorm; v.depthStencilPixelFormat = .depth32Float
   v.isPaused=true; v.enableSetNeedsDisplay=false; v.autoResizeDrawable=false; v.framebufferOnly=true
   v.drawableSize=NSSize(width:1600,height:1600*target.frame.height/target.frame.width)
-  p.contentView=v; overlay=p; canvas=v; p.orderFrontRegardless(); v.draw()
+  p.contentView=v; overlay=p; canvas=v
+  // Glass style is two layers of one loop: a heavily blurred full-bleed wash that lets the
+  // whole pane pick up the video's color and motion, and a sharp hero whose edges melt away.
+  // Hero sizing adapts to the source: portrait stands centered, landscape spans the width.
+  // Personal asset only; never present in public builds.
+  if attentionMode,AttentionPreferences.companionGlass,let companion=Bundle.main.url(forResource:"AttentionCompanion",withExtension:"mp4") {
+   let queue=AVQueuePlayer();queue.isMuted=true
+   queue.preventsDisplaySleepDuringVideoPlayback=false
+   glassLooper=AVPlayerLooper(player:queue,templateItem:AVPlayerItem(url:companion));glassPlayer=queue
+   let screenSize=target.frame.size
+   v.layerUsesCoreImageFilters=true
+   let ambient=AVPlayerLayer(player:queue);ambient.videoGravity = .resizeAspectFill
+   ambient.frame=CGRect(origin:.zero,size:screenSize);ambient.opacity=0
+   if let soften=CIFilter(name:"CIGaussianBlur") {soften.setValue(70,forKey:kCIInputRadiusKey);ambient.filters=[soften]}
+   v.layer?.addSublayer(ambient);glassAmbientLayer=ambient
+   let hero=AVPlayerLayer(player:queue);hero.videoGravity = .resizeAspect;hero.opacity=0
+   func layout(aspect:CGFloat) {
+    let heroSize:CGSize = aspect>=1
+     ? CGSize(width:screenSize.width,height:screenSize.width/aspect)
+     : CGSize(width:screenSize.height*0.86*aspect,height:screenSize.height*0.86)
+    hero.frame=CGRect(x:(screenSize.width-heroSize.width)/2,
+                      y:aspect>=1 ? (screenSize.height-heroSize.height)/2 : screenSize.height*0.06,
+                      width:heroSize.width,height:heroSize.height)
+    let vignette=CAGradientLayer();vignette.type = .radial
+    vignette.colors=[NSColor.white.cgColor,NSColor.white.cgColor,NSColor.clear.cgColor]
+    vignette.locations=[0,0.62,1]
+    vignette.startPoint=CGPoint(x:0.5,y:0.5);vignette.endPoint=CGPoint(x:1.02,y:1.02)
+    vignette.frame=CGRect(origin:.zero,size:heroSize)
+    hero.mask=vignette
+   }
+   layout(aspect:864.0/1056)
+   glassVideoStartedAt=ProcessInfo.processInfo.systemUptime;glassVideoDuration=13
+   let generationTicket=generation
+   Task { @MainActor [weak self] in
+    let asset=AVURLAsset(url:companion)
+    guard let track=try? await asset.loadTracks(withMediaType:.video).first,
+     let naturalSize=try? await track.load(.naturalSize),
+     let transform=try? await track.load(.preferredTransform) else{return}
+    let duration=(try? await asset.load(.duration)).map{CMTimeGetSeconds($0)}
+    guard let self=self,self.generation==generationTicket,self.glassVideoLayer===hero else{return}
+    if let duration=duration,duration.isFinite,duration>0.5 {self.glassVideoDuration=duration}
+    let oriented=naturalSize.applying(transform)
+    let aspect=abs(oriented.width)/max(1,abs(oriented.height))
+    CATransaction.begin();CATransaction.setDisableActions(true);layout(aspect:aspect);CATransaction.commit()
+   }
+   v.layer?.addSublayer(hero);glassVideoLayer=hero
+   queue.play()
+  }
+  p.orderFrontRegardless(); v.draw()
   if let cover=p as? AttentionCoverPanel {cover.requestRestore = {[weak self] in self?.requestAttentionRestore()};cover.makeKeyAndOrderFront(nil)}
  }
  func setMonitoringInterval(_ interval:Double) {
@@ -412,7 +478,9 @@ class DesktopPanel: NSPanel {
   generation += 1
   captureTask?.cancel(); captureTask=nil
   captureTimeout?.cancel(); captureTimeout=nil
-  attentionCard?.orderOut(nil);attentionCard=nil
+  attentionCard?.retire();attentionCard?.orderOut(nil);attentionCard=nil
+  glassPlayer?.pause();glassPlayer=nil;glassLooper=nil;glassVideoLayer=nil;glassAmbientLayer=nil
+  glassVideoStartedAt=0;attentionCardShownAt=0
   overlay?.orderOut(nil); overlay=nil; canvas=nil; renderer=nil
   previousProgress = -1
  }
@@ -434,6 +502,35 @@ class DesktopPanel: NSPanel {
   let args=CommandLine.arguments
   if args.contains("--sensor") { runSensor() }
   if let i=args.firstIndex(of:"--watch-parent"),args.count>i+1,let pid=Int32(args[i+1]) { runWatchdog(parent:pid) }
+  if args.contains("--preview-card") {
+   _ = NSApplication.shared
+   guard let screen=NSScreen.main else{exit(1)}
+   let card=AttentionCard(screen:screen)
+   card.clock.stringValue="1:23:45"
+   card.setMeta(away:"00:00:32",today:"4 小时 07 分")
+   card.setTask(reminder:"完成GTM的新增需求")
+   card.orderFrontRegardless()
+   DispatchQueue.main.asyncAfter(deadline:.now()+2.6){
+    Task { @MainActor in
+     // Capture the real composited pixels: off-screen caching cannot render the
+     // behind-window material or prove the corner mask.
+     guard let content=try? await SCShareableContent.excludingDesktopWindows(false,onScreenWindowsOnly:true),
+      let display=content.displays.first(where:{$0.displayID==CGMainDisplayID()}) else{return}
+     let filter=SCContentFilter(display:display,excludingWindows:[])
+     let configuration=SCStreamConfiguration()
+     let scale=CGFloat(display.width)>0 ? screen.backingScaleFactor : 2
+     let frame=card.frame,margin:CGFloat=24
+     configuration.sourceRect=CGRect(x:frame.minX-margin,y:screen.frame.maxY-frame.maxY-margin,width:frame.width+margin*2,height:frame.height+margin*2)
+     configuration.width=Int((frame.width+margin*2)*scale);configuration.height=Int((frame.height+margin*2)*scale)
+     configuration.showsCursor=false
+     guard let image=try? await SCScreenshotManager.captureImage(contentFilter:filter,configuration:configuration) else{return}
+     let rep=NSBitmapImageRep(cgImage:image)
+     try? rep.representation(using:.png,properties:[:])?.write(to:URL(fileURLWithPath:"/tmp/macduo-card.png"))
+    }
+   }
+   DispatchQueue.main.asyncAfter(deadline:.now()+20){exit(0)}
+   NSApplication.shared.run()
+  }
   if args.contains("--test-attention") {
    var gate=AttentionGate()
    for t in stride(from:0.0,through:2.0,by:0.2) {gate.sample(facing:false,at:t)}
@@ -541,7 +638,22 @@ class DesktopPanel: NSPanel {
    precondition(stall.state.phase == .armed && stall.state.baseline==DesktopApp.attentionReference,"Input mid-capture restores the reference")
    stall.state.sample(DesktopApp.attentionTriggerAngle);precondition(stall.state.phase == .capturing)
 
-   print("PASS: attention calibration, glance rejection, return, 100 cycles, idle-gated blur, re-arm after menu and input, mode selection and camera failure cleanup")
+   // On-screen time: pauses for a glance, ends with a shown blur, daily total rolls at midnight.
+   var tally=WorkTally()
+   tally.roll(to:"20260914")
+   tally.present(30,at:1000);tally.present(30,at:1010)
+   precondition(tally.stretch==60 && tally.today==60)
+   tally.endStretch()
+   precondition(tally.stretch==0 && tally.today==60,"Ending a stretch keeps the daily total")
+   tally.present(15,at:1020);precondition(tally.stretch==15 && tally.today==75)
+   tally.roll(to:"20260915")
+   precondition(tally.today==0,"A new day starts the total over")
+   tally.roll(to:"20260915");precondition(tally.today==0)
+   precondition(WorkTally.clock(5025)=="1:23:45" && WorkTally.phrase(45)=="45 秒" && WorkTally.phrase(300)=="5 分钟" && WorkTally.phrase(7320)=="2 小时 02 分")
+   let unloaded=WorkTally();unloaded.save()
+   precondition(true,"Saving an unloaded tally must be a no-op")
+
+   print("PASS: attention calibration, glance rejection, return, 100 cycles, idle-gated blur, work tally, re-arm after menu and input, mode selection and camera failure cleanup")
    exit(0)
   }
   if args.contains("--test-hinge-sound") {
@@ -747,6 +859,23 @@ class DesktopPanel: NSPanel {
    try! pair.1.fileHandleForWriting.close(); pair.0.waitUntilExit()
    precondition(pair.0.terminationStatus==0)
    print("PASS: healthy parent survives 30 seconds; watchdog exits on pipe close"); return
+  }
+  if let index=args.firstIndex(of:"--render-frost"),args.count>index+1 {
+   _ = NSApplication.shared
+   let engine=try! FoldEngine(rendering:true)
+   engine.params.mode=6;engine.params.padding=0
+   func dump(_ progress:Float,_ suffix:String) {
+    engine.params.progress=progress
+    let pixels=engine.pixels(width:1280,height:800)
+    let rep=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:1280,pixelsHigh:800,bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:1280*4,bitsPerPixel:32)!
+    for y in 0..<800 {for x in 0..<1280 {
+     let i=(y*1280+x)*4
+     rep.setColor(NSColor(deviceRed:CGFloat(pixels[i+2])/255,green:CGFloat(pixels[i+1])/255,blue:CGFloat(pixels[i])/255,alpha:1),atX:x,y:y)
+    }}
+    try? rep.representation(using:.png,properties:[:])!.write(to:URL(fileURLWithPath:args[index+1]+suffix))
+   }
+   dump(0.55,"-half.png");dump(1.0,"-full.png")
+   print("rendered");exit(0)
   }
   if args.contains("--test-lower-sharp"){
    _ = NSApplication.shared
